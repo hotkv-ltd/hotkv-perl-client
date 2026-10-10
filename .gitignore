@@ -1,0 +1,26 @@
+# Build output from ExtUtils::MakeMaker (perl Makefile.PL && make)
+/blib/
+/Makefile
+/Makefile.old
+/MYMETA.json
+/MYMETA.yml
+/pm_to_blib
+/*.tar.gz
+
+# make test / make dist artifacts
+/META.yml
+/META.json
+/MANIFEST.bak
+/SIGNATURE
+/HotKV-*/
+
+# Coverage / profiling
+/cover_db/
+/nytprof/
+nytprof.out
+
+# Editors and OS noise
+*.swp
+*~
+.DS_Store
+

@@ -1,0 +1,12 @@
+^\.git/
+^\.github/
+^\.gitignore$
+^blib/
+^pm_to_blib
+^Makefile$
+^Makefile\.old$
+^MYMETA\.
+^HotKV-.*
+\.bak$
+~$
+^cover_db/

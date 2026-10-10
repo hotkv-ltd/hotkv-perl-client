@@ -1,0 +1,118 @@
+name: Publish
+
+# Builds, tests and (unless it is a dry run) uploads the distribution to PAUSE.
+#
+#   * Pushing a tag v<VERSION> publishes. The tag must equal v plus the
+#     $VERSION in lib/HotKV.pm, and every module must agree.
+#   * Run by hand (workflow_dispatch), it only publishes when dry_run is
+#     turned off. A dry run does everything except the upload.
+#
+# Secrets (repository settings, Actions secrets): PAUSE_USER and PAUSE_PASSWORD.
+# They are only exposed to the upload step, through the environment, and are
+# never printed.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and test only; do not upload to PAUSE'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build, test and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: perl:5.38
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: perl -V
+        run: perl -V
+
+      - name: Check the release version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          perl -e '
+            use strict; use warnings;
+            my ($main) = do { local $/; open my $f, "<", "lib/HotKV.pm" or die $!; <$f> } =~ /^our \$VERSION\s*=\s*\x27([^\x27]+)\x27/m
+              or die "no \$VERSION in lib/HotKV.pm\n";
+            print "lib/HotKV.pm version: $main\n";
+            my $bad = 0;
+            for my $file (glob("lib/*.pm lib/*/*.pm lib/*/*/*.pm")) {
+              my $text = do { local $/; open my $f, "<", $file or die "$file: $!"; <$f> };
+              my ($v) = $text =~ /^our \$VERSION\s*=\s*\x27([^\x27]+)\x27/m;
+              next unless defined $v;
+              if ($v ne $main) { print "MISMATCH $file has $v\n"; $bad++ }
+            }
+            if ($ENV{EVENT_NAME} eq "push" && $ENV{REF_TYPE} eq "tag") {
+              my $want = "v$main";
+              if ($ENV{REF_NAME} ne $want) { print "tag $ENV{REF_NAME} does not match $want\n"; $bad++ }
+              else { print "tag $ENV{REF_NAME} matches\n" }
+            }
+            die "version check failed\n" if $bad;
+            print "version check ok\n";
+          '
+
+      - name: Build
+        run: |
+          perl Makefile.PL
+          make
+
+      - name: Test
+        # No HOTKV_TEST_URL, so the integration suites skip themselves; the
+        # unit tests (wire encoding, numbers, URL parsing, cluster routing
+        # with fake servers, pool reconnect against a local responder) run.
+        run: make test
+
+      - name: podchecker
+        run: |
+          cpanm --notest Pod::Checker
+          find lib -name '*.pm' -print0 | xargs -0 -n1 podchecker
+
+      - name: Build the distribution tarball
+        run: |
+          perl -MExtUtils::Manifest=fullcheck -e '
+            my ($missing, $extra) = fullcheck();
+            die "MANIFEST is out of date (run make manifest and commit it)\n" if @$missing || @$extra;
+            print "MANIFEST is complete\n";
+          '
+          make dist
+          ls -l HotKV-*.tar.gz
+          sha256sum HotKV-*.tar.gz
+
+      - name: List the tarball
+        run: tar tzf HotKV-*.tar.gz
+
+      - name: Upload to PAUSE
+        if: github.event_name == 'push' || inputs.dry_run == false
+        env:
+          PAUSE_USER: ${{ secrets.PAUSE_USER }}
+          PAUSE_PASSWORD: ${{ secrets.PAUSE_PASSWORD }}
+        run: |
+          if [ -z "$PAUSE_USER" ] || [ -z "$PAUSE_PASSWORD" ]; then
+            echo "PAUSE_USER and PAUSE_PASSWORD secrets are not configured" >&2
+            exit 1
+          fi
+          cpanm --notest CPAN::Uploader
+          umask 077
+          # CPAN::Uploader reads its credentials from a config file, so the
+          # password never appears on a command line or in the log.
+          printf 'user %s\npassword %s\n' "$PAUSE_USER" "$PAUSE_PASSWORD" > "$HOME/.pause"
+          cpan-upload --config "$HOME/.pause" HotKV-*.tar.gz
+          rm -f "$HOME/.pause"
+
+      - name: Dry run summary
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: |
+          echo "Dry run: built and tested $(ls HotKV-*.tar.gz); nothing was uploaded."

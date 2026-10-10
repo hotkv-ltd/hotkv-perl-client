@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-unit-test:
+    name: Build and unit test (perl ${{ matrix.perl }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 5.16 is the minimum declared in Makefile.PL (MIN_PERL_VERSION).
+        perl: ['5.16', '5.36', '5.38']
+    container:
+      image: perl:${{ matrix.perl }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: perl -V
+        run: perl -V
+
+      - name: Build
+        run: |
+          perl Makefile.PL
+          make
+
+      - name: Unit tests
+        # No HOTKV_TEST_URL is set, so the integration suites under t/
+        # skip themselves; only the unit tests (RESP encoding, URL
+        # parsing, CRC16, AI cache key determinism, error hierarchy,
+        # cluster routing/redirect logic) actually run here.
+        run: make test
+
+      - name: podchecker
+        run: |
+          cpanm --notest Pod::Checker
+          find lib -name '*.pm' -print0 | xargs -0 -n1 podchecker
+
+      - name: Check MANIFEST
+        run: |
+          perl -MExtUtils::Manifest=fullcheck -e '
+            my ($missing, $extra) = fullcheck();
+            die "MANIFEST is out of date (run make manifest and commit it)\n" if @$missing || @$extra;
+            print "MANIFEST is complete\n";
+          '
+
+      - name: Build distribution tarball
+        run: make dist
+
+  # Integration tests need a live HotKV server and are therefore optional
+  # in CI (this job only runs when explicitly requested). To run the full
+  # integration suite locally instead:
+  #
+  #   1. Start a HotKV server, e.g.:
+  #        hotkv --config hotkv.conf
+  #   2. Point the tests at it and run them:
+  #        HOTKV_TEST_URL=hotkv://127.0.0.1:6379 prove -Ilib t/
+  #
+  # Enterprise/AI commands whose license feature is missing skip themselves
+  # automatically when the server replies NOLICENSE.
+  integration-test:
+    name: Integration tests (manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch'
+    container:
+      image: perl:5.38
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build
+        run: |
+          perl Makefile.PL
+          make
+
+      - name: Integration tests
+        env:
+          HOTKV_TEST_URL: ${{ secrets.HOTKV_TEST_URL }}
+        run: |
+          if [ -z "$HOTKV_TEST_URL" ]; then
+            echo "HOTKV_TEST_URL secret not configured; skipping (see comments in this workflow for how to run locally)."
+            exit 0
+          fi
+          prove -Ilib t/
