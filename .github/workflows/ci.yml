@@ -17,7 +17,7 @@ jobs:
         # 5.16 is the minimum declared in Makefile.PL (MIN_PERL_VERSION).
         perl: ['5.16', '5.36', '5.38']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The official perl:5.16 Docker image uses a manifest format current
       # runners can no longer pull, so Perl is installed on the runner.
@@ -75,7 +75,7 @@ jobs:
     container:
       image: perl:5.38
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build
         run: |
