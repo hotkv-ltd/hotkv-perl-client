@@ -16,10 +16,14 @@ jobs:
       matrix:
         # 5.16 is the minimum declared in Makefile.PL (MIN_PERL_VERSION).
         perl: ['5.16', '5.36', '5.38']
-    container:
-      image: perl:${{ matrix.perl }}
     steps:
       - uses: actions/checkout@v6
+
+      # The official perl:5.16 Docker image uses a manifest format current
+      # runners can no longer pull, so Perl is installed on the runner.
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
 
       - name: perl -V
         run: perl -V
