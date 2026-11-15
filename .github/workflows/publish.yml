@@ -32,7 +32,7 @@ jobs:
     container:
       image: perl:5.38
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: perl -V
         run: perl -V
